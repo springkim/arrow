@@ -27,76 +27,6 @@
 #include <sstream>
 #include <unordered_map>
 
-// C++17 compatibility - std::optional replacement
-namespace parquet {
-namespace internal {
-template <typename T>
-class optional {
- private:
-  bool has_value_;
-  alignas(T) unsigned char storage_[sizeof(T)];
-
- public:
-  optional() : has_value_(false) {}
-  optional(const T& value) : has_value_(true) {
-    new (storage_) T(value);
-  }
-  optional(const optional& other) : has_value_(other.has_value_) {
-    if (has_value_) {
-      new (storage_) T(*other);
-    }
-  }
-  optional& operator=(const optional& other) {
-    if (this != &other) {
-      if (has_value_ && other.has_value_) {
-        **this = *other;
-      } else if (has_value_) {
-        reset();
-      } else if (other.has_value_) {
-        new (storage_) T(*other);
-        has_value_ = true;
-      }
-    }
-    return *this;
-  }
-  ~optional() {
-    if (has_value_) {
-      reinterpret_cast<T*>(storage_)->~T();
-    }
-  }
-
-  bool has_value() const { return has_value_; }
-  explicit operator bool() const { return has_value_; }
-
-  T& operator*() {
-    return *reinterpret_cast<T*>(storage_);
-  }
-  const T& operator*() const {
-    return *reinterpret_cast<const T*>(storage_);
-  }
-  T* operator->() {
-    return reinterpret_cast<T*>(storage_);
-  }
-  const T* operator->() const {
-    return reinterpret_cast<const T*>(storage_);
-  }
-
-  void reset() {
-    if (has_value_) {
-      reinterpret_cast<T*>(storage_)->~T();
-      has_value_ = false;
-    }
-  }
-};
-}  // namespace internal
-}  // namespace parquet
-
-// Use our own optional implementation
-namespace std {
-template <typename T>
-using optional = parquet::internal::optional<T>;
-inline constexpr auto nullopt = nullptr;
-
 // Forward declarations for Arrow types
 namespace arrow {
 namespace io {
@@ -127,6 +57,105 @@ class Future;
 }  // namespace arrow
 
 namespace parquet {
+
+// C++17 compatibility - std::optional replacement
+namespace internal {
+template <typename T>
+class optional {
+ private:
+  bool has_value_;
+  alignas(T) unsigned char storage_[sizeof(T)];
+
+ public:
+  optional() : has_value_(false) {}
+  
+  optional(std::nullptr_t) : has_value_(false) {}
+  
+  optional(const T& value) : has_value_(true) {
+    new (storage_) T(value);
+  }
+  
+  optional(const optional& other) : has_value_(other.has_value_) {
+    if (has_value_) {
+      new (storage_) T(*other);
+    }
+  }
+  
+  optional(optional&& other) noexcept : has_value_(other.has_value_) {
+    if (has_value_) {
+      new (storage_) T(std::move(*other));
+    }
+    other.has_value_ = false;
+  }
+  
+  optional& operator=(const optional& other) {
+    if (this != &other) {
+      if (has_value_ && other.has_value_) {
+        **this = *other;
+      } else if (has_value_) {
+        reset();
+      } else if (other.has_value_) {
+        new (storage_) T(*other);
+        has_value_ = true;
+      }
+    }
+    return *this;
+  }
+  
+  optional& operator=(optional&& other) noexcept {
+    if (this != &other) {
+      if (has_value_) {
+        reset();
+      }
+      if (other.has_value_) {
+        new (storage_) T(std::move(*other));
+        has_value_ = true;
+        other.has_value_ = false;
+      }
+    }
+    return *this;
+  }
+  
+  ~optional() {
+    if (has_value_) {
+      reinterpret_cast<T*>(storage_)->~T();
+    }
+  }
+
+  bool has_value() const { return has_value_; }
+  explicit operator bool() const { return has_value_; }
+
+  T& operator*() {
+    return *reinterpret_cast<T*>(storage_);
+  }
+  
+  const T& operator*() const {
+    return *reinterpret_cast<const T*>(storage_);
+  }
+  
+  T* operator->() {
+    return reinterpret_cast<T*>(storage_);
+  }
+  
+  const T* operator->() const {
+    return reinterpret_cast<const T*>(storage_);
+  }
+
+  void reset() {
+    if (has_value_) {
+      reinterpret_cast<T*>(storage_)->~T();
+      has_value_ = false;
+    }
+  }
+};
+
+// Null optional value
+struct nullopt_t {
+  explicit constexpr nullopt_t(int) {}
+};
+inline constexpr nullopt_t nullopt{0};
+
+}  // namespace internal
 
 // Basic type definitions
 enum class Type {
@@ -347,7 +376,7 @@ struct CryptoContext {
 // Data page statistics
 struct DataPageStats {
   DataPageStats(const EncodedStatistics* encoded_statistics, int32_t num_values,
-                parquet::internal::optional<int32_t> num_rows)
+                internal::optional<int32_t> num_rows)
       : encoded_statistics(encoded_statistics),
         num_values(num_values),
         num_rows(num_rows) {}
@@ -360,7 +389,7 @@ struct DataPageStats {
   // non-repeated fields, this will be the same as the number of rows.
   int32_t num_values;
   // Number of rows stored in the page. nullopt if not available.
-  parquet::internal::optional<int32_t> num_rows;
+  internal::optional<int32_t> num_rows;
 };
 
 // Page reader interface
